@@ -847,6 +847,22 @@ fn remove_tombstone(pipes_dir: &Path, name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Validate that a pipe name is a safe, single directory component and does
+/// not attempt path traversal or contain directory separators.
+pub fn validate_pipe_name(name: &str) -> Result<()> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err(anyhow!("pipe name cannot be empty"));
+    }
+    if trimmed.contains("..") || trimmed.contains('/') || trimmed.contains('\\') {
+        return Err(anyhow!(
+            "invalid pipe name '{}': path traversal sequences and separators are not allowed",
+            name
+        ));
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Local enabled overrides — per-device enabled state that never syncs.
 // Stored in `~/.screenpipe/pipes/.local-overrides.json`.
@@ -5014,6 +5030,7 @@ impl PipeManager {
         slug: &str,
         version: i64,
     ) -> Result<String> {
+        validate_pipe_name(slug)?;
         // Parse the source_md to get config + body
         let (mut config, body) = parse_frontmatter(source_md)?;
 
@@ -5047,6 +5064,8 @@ impl PipeManager {
         slug: &str,
         version: i64,
     ) -> Result<()> {
+        validate_pipe_name(name)?;
+        validate_pipe_name(slug)?;
         let dest_dir = self.pipes_dir.join(name);
         if !dest_dir.exists() {
             return Err(anyhow!("pipe '{}' not found", name));
@@ -5090,6 +5109,7 @@ impl PipeManager {
     /// Writes a tombstone so the pipe is not restored by builtin installation
     /// or cloud sync.
     pub async fn delete_pipe(&self, name: &str) -> Result<()> {
+        validate_pipe_name(name)?;
         let dir = self.pipes_dir.join(name);
         if !dir.exists() {
             return Err(self.pipe_not_found_error(name));
@@ -5151,6 +5171,7 @@ impl PipeManager {
 
     /// Clear a pipe's chat history by deleting its Pi session files.
     pub async fn clear_pipe_history(&self, name: &str) -> Result<()> {
+        validate_pipe_name(name)?;
         let pipe_dir = self.pipes_dir.join(name);
         if !pipe_dir.exists() {
             return Err(anyhow!("pipe '{}' not found", name));
@@ -8120,6 +8141,21 @@ impl Drop for PipeManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_validate_pipe_name_safety() {
+        assert!(validate_pipe_name("daily-summary").is_ok());
+        assert!(validate_pipe_name("sop_generator_1").is_ok());
+        assert!(validate_pipe_name("my-task-2026").is_ok());
+
+        assert!(validate_pipe_name("../../../etc/passwd").is_err());
+        assert!(validate_pipe_name("..\\..\\windows").is_err());
+        assert!(validate_pipe_name("foo/bar").is_err());
+        assert!(validate_pipe_name("foo\\bar").is_err());
+        assert!(validate_pipe_name("..").is_err());
+        assert!(validate_pipe_name("").is_err());
+        assert!(validate_pipe_name("   ").is_err());
+    }
     use chrono::{TimeZone, Timelike};
     use std::sync::atomic::Ordering;
 
