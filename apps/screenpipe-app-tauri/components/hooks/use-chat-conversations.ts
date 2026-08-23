@@ -39,6 +39,7 @@ import {
   searchConversations,
   migrateFromStoreBin,
   CHAT_HISTORY_INITIAL_LIMIT,
+  CHAT_PROCESSING_PLACEHOLDER,
   conversationDedupIdentity,
   updateConversationFlags,
   type ConversationMeta,
@@ -1317,6 +1318,21 @@ export function useChatConversations(opts: UseChatConversationsOpts) {
       !existing.hydratedAt ||
       !existing.messages ||
       existing.messages.length === 0 ||
+      // Force disk reload when in-memory assistant messages are missing,
+      // empty, or stuck as "Processing..." placeholders (e.g. interrupted
+      // streams). Without this, stale in-memory state hides completed
+      // replies that are already persisted on disk.
+      !existing.messages.some(
+        (m: unknown) => {
+          const msg = m as Message;
+          return (
+            msg.role === "assistant" &&
+            msg.content !== CHAT_PROCESSING_PLACEHOLDER &&
+            ((msg.content?.trim().length ?? 0) > 0 ||
+              msg.contentBlocks?.some((b: ContentBlock) => b.type !== "thinking"))
+          );
+        }
+      ) ||
       existing.titleSource == null;
     let persisted: ChatConversation | null = null;
 
